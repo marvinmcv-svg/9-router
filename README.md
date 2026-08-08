@@ -172,26 +172,27 @@ calls.
 
 ## Deploying
 
-State must be shared and durable, so **Supabase is required in production** —
-the filesystem fallback in `lib/store.ts` is for local development only, and on
-serverless hosts it silently loses memory and OAuth tokens between invocations.
+**[DEPLOY.md](./DEPLOY.md) is the full guide.** The short version: import the
+repo at [vercel.com/new](https://vercel.com/new), set `JARVIS_PASSWORD`,
+`JARVIS_AUTH_SECRET`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, then sign
+in and paste your model key into the Model panel.
 
-```bash
-# 1. Run supabase/schema.sql against your project
-# 2. Set env vars: ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-#    JARVIS_BASE_URL, JARVIS_CRON_SECRET, plus any connector tokens
-# 3. Add https://<your-domain>/api/auth/google to the Google OAuth client
-vercel deploy
-```
+Two things are worth knowing before you do:
 
-`vercel.json` schedules the routines. `JARVIS_CRON_SECRET` guards the trigger
-endpoint — routines refuse to run in production without it, because that URL
-starts a paid agent run with full access to your accounts.
+**Serverless has no shell.** Vercel's filesystem is read-only and ephemeral, so
+`fs.write`, `fs.edit` and `shell.exec` are hidden on that host and the system
+prompt says so. Deployed you get mail, calendar, drive, GitHub, memory,
+subagents and routines; for editing files and running commands, run JARVIS on a
+real machine.
 
-> **Deploy this for yourself, behind auth.** There is no multi-tenancy and no
-> login: the app assumes the person using it owns the connected accounts.
-> Anyone who reaches the URL can read your mail. Put it behind Vercel
-> Authentication, Cloudflare Access, or equivalent before it leaves localhost.
+**Supabase is required, not optional.** Serverless functions don't share a
+filesystem between invocations, so the local JSON store loses memory, sessions
+and OAuth tokens silently. `supabase/schema.sql` sets up the one table it needs.
+
+Access is a password plus an HMAC-signed session cookie, enforced in middleware
+so nothing reaches the kernel without it. **With no password configured the app
+serves 503 rather than opening** — a misconfigured deployment is locked, not
+exposed. It's still single-user: whoever knows the password has your mailbox.
 
 ---
 
