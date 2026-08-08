@@ -6,6 +6,7 @@ import { decide, DEFAULT_POLICY, setOverride } from "./permissions";
 import { availableSyscalls, getSyscall } from "./registry";
 import { recall, remember } from "./memory";
 import { loadSession } from "./session";
+import type { Provider } from "./provider";
 import type { KernelEvent, Syscall } from "./types";
 
 // The store reads JARVIS_DATA_DIR at import time, so `npm test` points it at a
@@ -20,13 +21,19 @@ if (!process.env.JARVIS_DATA_DIR) {
  * loop consumes them in order, so a script can drive the loop through an
  * approval pause and out the other side.
  */
-function scriptedClient(turns: { text?: string; toolUse?: { name: string; input: unknown }[] }[]) {
+function scriptedClient(
+  turns: { text?: string; toolUse?: { name: string; input: unknown }[] }[],
+): Provider {
   let turn = 0;
   return {
-    messages: {
-      stream() {
-        const current = turns[turn++] ?? { text: "done" };
-        const content = [
+    kind: "anthropic",
+    model: "scripted",
+    async stream(_request, onDelta) {
+      const current = turns[turn++] ?? { text: "done" };
+      if (current.text) onDelta({ type: "text", text: current.text });
+
+      return {
+        content: [
           ...(current.text ? [{ type: "text" as const, text: current.text }] : []),
           ...(current.toolUse ?? []).map((t, i) => ({
             type: "tool_use" as const,
@@ -34,28 +41,12 @@ function scriptedClient(turns: { text?: string; toolUse?: { name: string; input:
             name: t.name,
             input: t.input,
           })),
-        ];
-
-        const message = {
-          content,
-          stop_reason: current.toolUse?.length ? "tool_use" : "end_turn",
-          usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0 },
-        };
-
-        return {
-          async *[Symbol.asyncIterator]() {
-            if (current.text) {
-              yield {
-                type: "content_block_delta",
-                delta: { type: "text_delta", text: current.text },
-              };
-            }
-          },
-          finalMessage: async () => message,
-        };
-      },
+        ],
+        stopReason: current.toolUse?.length ? "tool_use" : "end_turn",
+        usage: { inputTokens: 10, outputTokens: 5, cacheRead: 0 },
+      };
     },
-  } as never;
+  };
 }
 
 async function collect(gen: AsyncGenerator<KernelEvent>): Promise<KernelEvent[]> {

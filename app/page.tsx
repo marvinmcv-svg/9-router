@@ -10,18 +10,29 @@ import {
   Panel,
   SyscallPanel,
 } from "@/components/panels";
+import { AgentPanel, ModelPanel } from "@/components/settings";
+
+type PanelId = "model" | "agents" | "syscalls" | "memory" | "connectors";
+
+const PANELS: { id: PanelId; label: string; subtitle: string }[] = [
+  { id: "model", label: "Model", subtitle: "which brain runs this" },
+  { id: "agents", label: "Agents", subtitle: "who it can delegate to" },
+  { id: "connectors", label: "Links", subtitle: "what it can reach" },
+  { id: "syscalls", label: "Perms", subtitle: "auto · ask · off" },
+  { id: "memory", label: "Memory", subtitle: "what it knows about you" },
+];
 
 const SUGGESTIONS = [
-  "What does my day look like?",
+  "What's in this workspace? Give me the layout.",
+  "Run the test suite and tell me what's failing",
+  "Delegate a review of the kernel to the engineer agent",
   "Anything in my inbox that needs a reply?",
-  "Find me an hour with Sam this week and send the invite",
-  "What's failing in CI right now?",
 ];
 
 export default function Desktop() {
   const jarvis = useJarvis();
   const [draft, setDraft] = useState("");
-  const [panel, setPanel] = useState<"syscalls" | "memory" | "connectors">("connectors");
+  const [panel, setPanel] = useState<PanelId>("model");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -189,39 +200,39 @@ export default function Desktop() {
 
       {/* System column */}
       <aside style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-        <div style={{ display: "flex", gap: 6 }}>
-          {(["connectors", "syscalls", "memory"] as const).map((id) => (
+        <div style={{ display: "flex", gap: 4 }}>
+          {PANELS.map((p) => (
             <button
-              key={id}
-              onClick={() => setPanel(id)}
+              key={p.id}
+              onClick={() => setPanel(p.id)}
               style={{
                 flex: 1,
-                fontSize: 11,
-                textTransform: "capitalize",
-                borderColor: panel === id ? "var(--border-bright)" : "var(--border)",
-                color: panel === id ? "var(--text)" : "var(--text-dim)",
+                fontSize: 10.5,
+                padding: "5px 4px",
+                borderColor: panel === p.id ? "var(--border-bright)" : "var(--border)",
+                color: panel === p.id ? "var(--text)" : "var(--text-dim)",
               }}
             >
-              {id}
+              {p.label}
             </button>
           ))}
         </div>
 
-        {panel === "connectors" && (
-          <Panel title="Connectors" subtitle="what JARVIS can reach" flex>
-            <ConnectorPanel system={jarvis.system} />
-          </Panel>
-        )}
-        {panel === "syscalls" && (
-          <Panel title="Syscalls" subtitle="auto · ask · off" flex>
+        <Panel
+          title={PANELS.find((p) => p.id === panel)!.label}
+          subtitle={PANELS.find((p) => p.id === panel)!.subtitle}
+          flex
+        >
+          {panel === "model" && <ModelPanel />}
+          {panel === "agents" && <AgentPanel />}
+          {panel === "connectors" && <ConnectorPanel system={jarvis.system} />}
+          {panel === "syscalls" && (
             <SyscallPanel system={jarvis.system} onChange={jarvis.refreshSystem} />
-          </Panel>
-        )}
-        {panel === "memory" && (
-          <Panel title="Memory" subtitle="what it knows about you" flex>
+          )}
+          {panel === "memory" && (
             <MemoryPanel system={jarvis.system} onChange={jarvis.refreshSystem} />
-          </Panel>
-        )}
+          )}
+        </Panel>
 
         <Panel title="Sessions">
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>

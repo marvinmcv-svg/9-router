@@ -4,8 +4,14 @@ An agentic operating system for one person's working life. Not a chatbot with
 plugins — a shell that sits between you and your mail, calendar, files, code
 and infrastructure, and does the work.
 
-Runs on `claude-opus-5` with adaptive thinking. Reads happen instantly; anything
-that changes the world stops and asks you first.
+It has a real workspace and a real shell: it lists, reads, edits and writes
+files, and runs builds, tests and git. It delegates to subagents that run their
+own loops on their own models. Reads happen instantly; anything that changes
+the world stops and asks you first.
+
+**Bring your own model.** Anthropic, any Anthropic-compatible gateway (GLM/Z.ai,
+LiteLLM), or anything OpenAI-compatible (Ollama, vLLM, OpenRouter, llama.cpp).
+Paste a key in the Model panel and it switches at runtime — no redeploy.
 
 ---
 
@@ -47,13 +53,59 @@ Browser (OS shell)
    ▼
 /api/kernel ──► kernel/agent.ts        the loop: stream, tool_use, resume
                     │
+                    ├─ kernel/provider.ts      Anthropic / compatible / OpenAI
                     ├─ kernel/permissions.ts   allow / ask / deny per call
                     ├─ kernel/memory.ts        persistent facts + episodes
+                    ├─ kernel/delegate.ts      nested loop for subagents
                     ├─ kernel/registry.ts      syscall table → tool schemas
-                    └─ syscalls/*              Gmail, Calendar, Drive,
-                                               GitHub, Vercel, Railway,
-                                               Supabase, web, memory
+                    └─ syscalls/*              fs, shell, agents, Gmail,
+                                               Calendar, Drive, GitHub,
+                                               Vercel, Railway, Supabase, web
 ```
+
+### Provider independence
+
+The kernel speaks Anthropic's content-block shape as its canonical form — it's
+the most expressive of the wire formats (typed tool calls, thinking blocks,
+cache control) — and each adapter translates at the boundary. Adding a provider
+means implementing one `stream` method; the loop, permission engine and UI
+don't change.
+
+Capability flags are per-vendor defaults rather than assumptions: most
+compatible gateways reject `thinking` and `output_config`, so those are omitted
+unless the provider is known to support them. That's why pointing at GLM works
+without touching any other setting.
+
+### Subagents
+
+`agent.delegate` hands a self-contained task to a specialist that runs its own
+loop, with its own model and a narrowed syscall set, and returns a report. The
+worker's searching and reading happens in *its* context window — which is the
+whole point: the coordinator gets the finding, not the hundred files.
+
+Several `agent.delegate` calls in one turn run concurrently, as do any other
+independent syscalls.
+
+**Subagents are read-only by default, and that's a security property rather
+than caution.** They report; the coordinator carries out the resulting action.
+Every write therefore funnels through one approval card you actually see,
+instead of being scattered across parallel workers. Flip `canWrite` per agent
+in the Agents panel when you want a worker that edits directly (the built-in
+`engineer` is one).
+
+Delegation is deliberately absent from every subagent's toolset, so recursion
+is impossible by construction rather than by depth counter.
+
+### The workspace
+
+`fs.*` and `shell.exec` operate on a real directory set by `JARVIS_WORKSPACE`.
+Model-supplied paths are untrusted input: each is resolved to its canonical
+form and checked for containment, with `realpath` applied so a symlink pointing
+at `/etc` is refused rather than followed. That check lives in one function
+every filesystem syscall routes through.
+
+`shell.exec` is `dangerous`, which means it can never be auto-allowed by
+loosening a tier default — it takes an explicit per-syscall override.
 
 **The interesting part is the pause.** A turn that hits an approval doesn't
 block a request thread waiting on a human — it persists its state (conversation,
@@ -74,14 +126,35 @@ ever outgrows that; nothing outside the file depends on the method.
 ## Setup
 
 ```bash
-cp .env.example .env.local     # add ANTHROPIC_API_KEY at minimum
+cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000. It works with only an Anthropic key — you get
-memory and web fetch. Every other syscall stays hidden until its connector has
-credentials, because a tool the model can see is a tool it will eventually call.
+Open http://localhost:3000, go to the **Model** panel, paste your key, and hit
+**Save & test** — it sends a real request and shows you the reply, because a
+configuration that looks right and doesn't work is the expensive kind.
+
+For GLM / Z.ai specifically:
+
+| Field | Value |
+|---|---|
+| Provider | Anthropic-compatible |
+| Base URL | `https://api.z.ai/api/anthropic` |
+| Model | `glm-4.6` |
+| API key | your `id.secret` key |
+
+For a local model (Ollama, vLLM, LM Studio): choose **OpenAI-compatible**, base
+URL `http://localhost:11434/v1`, and whatever model name you're serving.
+
+Set `JARVIS_WORKSPACE` to the directory you want it working in. Without it,
+JARVIS operates on its own source tree — fine for trying it out, probably not
+what you want day to day.
+
+That's the whole floor: with a model and a workspace you get filesystem, shell,
+memory, web, and subagents. Every other syscall stays hidden until its
+connector has credentials, because a tool the model can see is a tool it will
+eventually call.
 
 **Google (Gmail, Calendar, Drive).** Create an OAuth 2.0 *Web application*
 client at [console.cloud.google.com](https://console.cloud.google.com), enable
@@ -161,11 +234,43 @@ seconds: it should surface whatever would make them say no.
 
 ---
 
+## Adding an agent
+
+Agents are data too. The Agents panel edits them at runtime; `kernel/agents.ts`
+holds the built-in roster:
+
+```ts
+{
+  id: "hermes",
+  name: "Hermes",
+  description: "…",          // ← the coordinator picks who to delegate to from this
+  systemPrompt: "…",
+  allow: ["fs.read", "web."], // ← prefix-scoped syscall allow-list
+  canWrite: false,
+  model: { kind: "openai-compatible", baseUrl: "http://localhost:11434/v1", model: "hermes-3" },
+  maxIterations: 20,
+}
+```
+
+Write the `description` for the coordinator to read — it's how JARVIS decides
+who gets a task. Omit `model` to inherit whatever the Model panel is set to.
+
+## Testing
+
+```bash
+npm test        # 24 tests
+```
+
+The suite includes a mock server speaking OpenAI's streaming wire format, so
+the kernel loop, tool dispatch, permission engine, delegation and real
+filesystem syscalls are all exercised end to end against a non-Anthropic
+provider. Parallel execution is verified by timing rather than asserted.
+
 ## What this doesn't do yet
 
-- **No local execution.** Everything runs in the web app, so JARVIS can't touch
-  your filesystem or run shell commands. A local agent that pairs with this
-  cloud brain is the obvious next step.
+- **Runs where the server runs.** The shell and filesystem are the *host's*, so
+  deployed to Vercel it operates on the deployment, not your laptop. Run it
+  locally to have it work on your machine.
 - **No push.** Routines write their output to state; nothing notifies you.
 - **No voice.**
 - **Infrastructure is read-only.** Vercel, Railway and Supabase syscalls

@@ -11,27 +11,12 @@ import { getSyscall, previewCall, toolDefinitions } from "./registry";
 import { recall, renderMemory } from "./memory";
 import { situationPrompt, staticPrompt } from "./prompt";
 import { loadSession, saveSession, type Session } from "./session";
+import { buildProvider, type Delta, type Provider } from "./provider";
+import { createQueue } from "./stream";
 
-const MODEL = "claude-opus-5";
 const MAX_ITERATIONS = 40;
-
-let cachedClient: Anthropic | null = null;
-
-/**
- * Constructed on first use, not at import. The SDK throws when no key is
- * configured, and doing that at module load turns a missing env var into an
- * opaque 500 on every route that transitively imports the kernel.
- */
-function anthropic(): Anthropic {
-  if (cachedClient) return cachedClient;
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error(
-      "ANTHROPIC_API_KEY is not set. Add it to .env.local and restart the server.",
-    );
-  }
-  cachedClient = new Anthropic();
-  return cachedClient;
-}
+/** Per-turn output budget. */
+const MAX_TOKENS = 32_000;
 
 export interface RunInput {
   sessionId: string;
@@ -40,11 +25,11 @@ export interface RunInput {
   timezone?: string;
   signal?: AbortSignal;
   /**
-   * Override the model client. Exists so the approval state machine can be
-   * driven by a scripted model in tests — it spans multiple HTTP requests and
-   * is not something to verify by hand.
+   * Override the model. Exists so the approval state machine can be driven by
+   * a scripted provider in tests — it spans multiple HTTP requests and is not
+   * something to verify by hand.
    */
-  client?: Pick<Anthropic, "messages">;
+  client?: Provider;
 }
 
 /**
@@ -60,6 +45,13 @@ export async function* run(opts: RunInput): AsyncGenerator<KernelEvent> {
 
   const session = await loadSession(sessionId);
   const policy = await getPolicy();
+  let provider: Provider;
+  try {
+    provider = opts.client ?? (await buildProvider());
+  } catch (err) {
+    yield { type: "error", message: err instanceof Error ? err.message : String(err) };
+    return;
+  }
 
   try {
     if (opts.input.type === "user") {
@@ -99,48 +91,45 @@ export async function* run(opts: RunInput): AsyncGenerator<KernelEvent> {
 
       const memory = renderMemory(await recall(lastUserText(session), 12));
 
-      const stream = (opts.client ?? anthropic()).messages.stream(
-        {
-          model: MODEL,
-          max_tokens: 64000,
-          // Adaptive thinking is on by default on this model, but `display`
-          // defaults to omitted — without this the UI shows a long silent
-          // pause instead of the model's reasoning.
-          thinking: { type: "adaptive", display: "summarized" },
-          output_config: { effort: "high" },
+      // Providers push deltas through a callback; the queue turns that into
+      // something this generator can yield from, so tokens reach the browser
+      // while the request is still open.
+      const deltas = createQueue<Delta>();
+      const pending = provider
+        .stream(
+          {
           system: [
             // Stable half carries the cache breakpoint; the volatile half
             // (clock, recalled memory) sits after it and re-renders each turn.
             { type: "text", text: staticPrompt(), cache_control: { type: "ephemeral" } },
             { type: "text", text: situationPrompt({ now: new Date(), timezone, memory, policy }) },
           ],
-          tools: toolDefinitions(),
-          messages: session.messages,
-        },
-        { signal },
-      );
+            messages: session.messages,
+            tools: toolDefinitions(),
+            maxTokens: MAX_TOKENS,
+            signal,
+          },
+          (delta) => deltas.push(delta),
+        )
+        // Close on both paths, or a failed request leaves the loop below
+        // waiting forever on a queue nothing will ever push to again.
+        .finally(() => deltas.close());
 
-      for await (const event of stream) {
-        if (event.type === "content_block_delta") {
-          if (event.delta.type === "text_delta") {
-            yield { type: "text", text: event.delta.text };
-          } else if (event.delta.type === "thinking_delta") {
-            yield { type: "thinking", text: event.delta.thinking };
-          }
-        }
+      for await (const delta of deltas) {
+        yield { type: delta.type, text: delta.text };
       }
 
-      const message = await stream.finalMessage();
+      const message = await pending;
       session.messages.push({ role: "assistant", content: message.content });
 
       yield {
         type: "usage",
-        inputTokens: message.usage.input_tokens,
-        outputTokens: message.usage.output_tokens,
-        cacheRead: message.usage.cache_read_input_tokens ?? 0,
+        inputTokens: message.usage.inputTokens,
+        outputTokens: message.usage.outputTokens,
+        cacheRead: message.usage.cacheRead,
       };
 
-      if (message.stop_reason === "refusal") {
+      if (message.stopReason === "refusal") {
         yield {
           type: "error",
           message: "That request was declined by the model's safety systems.",
@@ -151,7 +140,7 @@ export async function* run(opts: RunInput): AsyncGenerator<KernelEvent> {
       }
 
       const toolUses = message.content.filter(
-        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+        (b): b is Anthropic.ToolUseBlockParam => b.type === "tool_use",
       );
 
       if (!toolUses.length) {
@@ -162,7 +151,11 @@ export async function* run(opts: RunInput): AsyncGenerator<KernelEvent> {
 
       const results: Anthropic.ToolResultBlockParam[] = [];
       const approvals: PendingApproval[] = [];
+      const runnable: Anthropic.ToolUseBlockParam[] = [];
 
+      // Classify every call first, then run the permitted ones together. A
+      // turn that delegates to three subagents should take as long as the
+      // slowest, not the sum — and fan-out is the main reason to delegate.
       for (const call of toolUses) {
         const syscall = getSyscall(call.name);
         if (!syscall) {
@@ -199,13 +192,21 @@ export async function* run(opts: RunInput): AsyncGenerator<KernelEvent> {
           continue;
         }
 
-        yield { type: "syscall_start", id: call.id, name: syscall.name, input: call.input };
-        const outcome = await execute(call, signal);
+        runnable.push(call);
+      }
+
+      for (const call of runnable) {
+        yield { type: "syscall_start", id: call.id, name: call.name, input: call.input };
+      }
+
+      const outcomes = await Promise.all(runnable.map((call) => execute(call, signal)));
+
+      for (const [index, outcome] of outcomes.entries()) {
         results.push(outcome.result);
         yield {
           type: "syscall_end",
-          id: call.id,
-          name: syscall.name,
+          id: runnable[index].id,
+          name: runnable[index].name,
           ok: outcome.ok,
           summary: outcome.summary,
         };

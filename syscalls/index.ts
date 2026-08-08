@@ -1,7 +1,9 @@
 import type { Syscall } from "@/kernel/types";
+import { agentSyscalls } from "./agents";
 import { coreSyscalls } from "./core";
 import { githubSyscalls } from "./github";
 import { infraSyscalls } from "./infra";
+import { systemSyscalls } from "./system";
 import { calendarSyscalls } from "./google/calendar";
 import { driveSyscalls } from "./google/drive";
 import { gmailSyscalls } from "./google/gmail";
@@ -14,6 +16,8 @@ import { gmailSyscalls } from "./google/gmail";
  */
 export const syscalls: Syscall[] = [
   ...coreSyscalls,
+  ...systemSyscalls,
+  ...agentSyscalls,
   ...gmailSyscalls,
   ...calendarSyscalls,
   ...driveSyscalls,
