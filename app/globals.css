@@ -1,0 +1,119 @@
+:root {
+  --bg: #06070a;
+  --bg-panel: rgba(18, 22, 32, 0.72);
+  --bg-raised: rgba(30, 36, 50, 0.66);
+  --border: rgba(120, 150, 200, 0.16);
+  --border-bright: rgba(120, 180, 255, 0.38);
+  --text: #e8edf7;
+  --text-dim: #8b98b0;
+  --text-faint: #5d6880;
+  --accent: #4ea3ff;
+  --accent-dim: rgba(78, 163, 255, 0.14);
+  --warn: #ffb454;
+  --danger: #ff6b6b;
+  --ok: #4ade80;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Ambient field. Two slow-drifting radial washes so the desktop reads as a
+   live surface rather than a flat page — cheap, GPU-composited, no JS. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -30%;
+  background:
+    radial-gradient(46% 46% at 22% 28%, rgba(40, 110, 220, 0.2), transparent 62%),
+    radial-gradient(40% 40% at 80% 72%, rgba(120, 60, 220, 0.16), transparent 60%);
+  animation: drift 34s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(-2%, -1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(3%, 2%, 0) scale(1.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  border-radius: 8px;
+  padding: 6px 12px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--border-bright);
+  background: rgba(60, 90, 140, 0.3);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+textarea,
+input {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  width: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 150, 200, 0.2);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 150, 200, 0.38);
+}
+
+a {
+  color: var(--accent);
+}

@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+build/
+
+# Local kernel state — memory, sessions, OAuth tokens. Never commit this.
+.jarvis/
+
+.env
+.env.local
+.env*.local
+
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
