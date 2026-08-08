@@ -3,7 +3,7 @@ import type { ApprovalDecision } from "@/kernel/types";
 
 export const runtime = "nodejs";
 // Agentic runs are long; never let the platform cut the stream mid-turn.
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 interface Body {
   sessionId: string;

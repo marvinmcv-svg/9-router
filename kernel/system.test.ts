@@ -100,6 +100,44 @@ test("shell.exec is classified dangerous so it can never be auto-allowed by tier
   assert.equal(getSyscall("fs.read")!.risk, "read");
 });
 
+test("a serverless host hides the syscalls it cannot honour", async () => {
+  const { availableSyscalls, allRegistered, isAvailable } = await import("./registry");
+
+  const before = availableSyscalls().map((s) => s.name);
+  assert.ok(before.includes("shell.exec"), "a normal host should offer the shell");
+  assert.ok(before.includes("fs.write"));
+
+  process.env.VERCEL = "1";
+  try {
+    const during = availableSyscalls().map((s) => s.name);
+
+    // A read-only serverless filesystem cannot honour these, and a tool the
+    // model can see is a tool it will eventually call.
+    assert.ok(!during.includes("shell.exec"), "shell must be hidden on serverless");
+    assert.ok(!during.includes("fs.write"), "fs.write must be hidden on serverless");
+    assert.ok(!during.includes("fs.edit"), "fs.edit must be hidden on serverless");
+
+    // Reads still work — the deployment's own files are readable.
+    assert.ok(during.includes("fs.read"));
+    assert.ok(during.includes("agent.delegate"), "delegation is host-independent");
+
+    // Availability must have exactly one definition. This is a regression
+    // guard: the UI once computed its own and silently disagreed with the
+    // toolset the model was actually given.
+    for (const syscall of allRegistered()) {
+      assert.equal(
+        isAvailable(syscall),
+        during.includes(syscall.name),
+        `${syscall.name}: isAvailable() disagrees with availableSyscalls()`,
+      );
+    }
+  } finally {
+    delete process.env.VERCEL;
+  }
+
+  assert.deepEqual(availableSyscalls().map((s) => s.name), before, "gating must be reversible");
+});
+
 test("subagent allow-lists are prefix-scoped, not substring matches", () => {
   const researcher: AgentDefinition = {
     id: "r",

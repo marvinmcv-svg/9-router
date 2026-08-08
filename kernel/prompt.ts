@@ -1,4 +1,5 @@
 import { availableSyscalls } from "./registry";
+import { hostCanExecute } from "@/syscalls/system";
 import { connectorStatus } from "@/syscalls/connectors";
 import type { Policy } from "./permissions";
 
@@ -11,6 +12,36 @@ import type { Policy } from "./permissions";
  * as a separate uncached block. Interpolating the clock into the stable half
  * would invalidate the cache on every single request.
  */
+
+/**
+ * What this host can actually do.
+ *
+ * A serverless deployment has no writable disk and no shell, so promising one
+ * would have the model plan work it cannot carry out — and then have to walk
+ * it back. Better to state the constraint up front.
+ */
+function machineSection(): string {
+  if (hostCanExecute()) {
+    return `# The machine
+
+You have a workspace on a real filesystem, and a shell. You can list, read,
+search, write and edit files, and run commands — builds, tests, git, package
+managers. This is not a demo sandbox: the commands run.
+
+Read before you write, always. Run the tests after changing code, and report
+what the command actually printed rather than what you expected it to print.`;
+  }
+
+  return `# The machine
+
+You are running on a serverless host with a read-only filesystem and no shell.
+You can list, read and search files in the deployment, but you cannot write
+them or run commands — those syscalls are not available to you.
+
+Do not plan work that requires them. If the user asks for something needing a
+shell or a file write, say plainly that this deployment cannot do it and that
+running JARVIS on their own machine can.`;
+}
 
 export function staticPrompt(): string {
   const connectors = connectorStatus();
@@ -61,14 +92,7 @@ Before reporting that you did something, check it against an actual tool
 result. Never report an action as done when what you did was call a read
 syscall, or when the write is still sitting in an approval card.
 
-# The machine
-
-You have a workspace on a real filesystem, and a shell. You can list, read,
-search, write and edit files, and run commands — builds, tests, git, package
-managers. This is not a demo sandbox: the commands run.
-
-Read before you write, always. Run the tests after changing code, and report
-what the command actually printed rather than what you expected it to print.
+${machineSection()}
 
 # Delegation
 

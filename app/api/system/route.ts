@@ -1,6 +1,7 @@
 import { decide, getPolicy, setOverride, type Policy } from "@/kernel/permissions";
-import { allRegistered } from "@/kernel/registry";
-import { connectorAvailable, connectorStatus } from "@/syscalls/connectors";
+import { allRegistered, isAvailable } from "@/kernel/registry";
+import { connectorStatus } from "@/syscalls/connectors";
+import { hostCanExecute } from "@/syscalls/system";
 import { isConnected } from "@/syscalls/google/auth";
 import { listSessions } from "@/kernel/session";
 import { all as allMemory, forget } from "@/kernel/memory";
@@ -23,7 +24,7 @@ export async function GET(): Promise<Response> {
       summary: s.description.split(". ")[0],
       risk: s.risk,
       connector: s.connector ?? "core",
-      available: !s.connector || connectorAvailable(s.connector),
+      available: isAvailable(s),
       decision: decide(s, policy),
     }));
 
@@ -39,6 +40,9 @@ export async function GET(): Promise<Response> {
 
   return Response.json({
     storeBackend,
+    // Surfaced so the UI can explain why the filesystem and shell syscalls are
+    // missing on a serverless deployment, rather than leaving a silent gap.
+    canExecute: hostCanExecute(),
     policy,
     syscalls,
     connectors,

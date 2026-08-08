@@ -1,7 +1,7 @@
 import { latestResult, ROUTINES, runRoutine } from "@/routines";
 
 export const runtime = "nodejs";
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 /** List routines with their most recent output. */
 export async function GET(): Promise<Response> {

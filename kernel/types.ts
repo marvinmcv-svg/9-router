@@ -49,6 +49,13 @@ export interface Syscall<I = any, O = any> {
   preview?: (input: I) => string;
   /** Which connector this belongs to; used to hide syscalls with no credentials. */
   connector?: string;
+  /**
+   * Extra availability check beyond credentials — for capabilities the host
+   * itself may not provide. A serverless deployment has no writable disk and
+   * no shell, and a syscall the model can see is one it will eventually call,
+   * so those are hidden rather than left to fail at runtime.
+   */
+  available?: () => boolean;
   run: (input: I, ctx: SyscallContext) => Promise<O>;
 }
 

@@ -29,9 +29,22 @@ export function allRegistered(): Syscall[] {
   return [...table.values()];
 }
 
+/**
+ * Whether a syscall is callable right now.
+ *
+ * The single source of truth for availability. Anything that reports on
+ * syscalls — the tool schema, the UI panel — must route through this, or the
+ * model gets offered a tool the loop would refuse to run.
+ */
+export function isAvailable(syscall: Syscall): boolean {
+  if (syscall.connector && !connectorAvailable(syscall.connector)) return false;
+  if (syscall.available && !syscall.available()) return false;
+  return true;
+}
+
 /** Syscalls the model can actually call right now. */
 export function availableSyscalls(): Syscall[] {
-  return allRegistered().filter((s) => !s.connector || connectorAvailable(s.connector));
+  return allRegistered().filter(isAvailable);
 }
 
 export function toolDefinitions(): Anthropic.Tool[] {

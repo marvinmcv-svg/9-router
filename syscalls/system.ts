@@ -22,6 +22,24 @@ function workspace(): string {
 }
 
 /**
+ * Whether this host can actually execute and write.
+ *
+ * Serverless platforms give you a read-only filesystem, no persistent disk,
+ * and a container that vanishes between requests — so `fs.write` and
+ * `shell.exec` are not merely restricted there, they are meaningless. They are
+ * hidden from the model rather than left to fail with a confusing EROFS
+ * halfway through a task.
+ *
+ * `JARVIS_ALLOW_EXEC=true` forces them on for hosts that look serverless but
+ * genuinely have a writable disk (a container on Fly, Railway, or a VPS).
+ */
+export function hostCanExecute(): boolean {
+  if (process.env.JARVIS_ALLOW_EXEC === "true") return true;
+  if (process.env.JARVIS_ALLOW_EXEC === "false") return false;
+  return !process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME;
+}
+
+/**
  * Resolve a model-supplied path inside the workspace, or throw.
  *
  * `realpath` on the parent defeats symlinks that point outside the root —
@@ -161,6 +179,7 @@ export const systemSyscalls: Syscall[] = [
 
   {
     name: "fs.write",
+    available: hostCanExecute,
     risk: "write",
     description:
       "Create a file or overwrite it completely. For changing part of an existing file prefer fs.edit, which cannot silently discard content you did not read.",
@@ -194,6 +213,7 @@ export const systemSyscalls: Syscall[] = [
 
   {
     name: "fs.edit",
+    available: hostCanExecute,
     risk: "write",
     description:
       "Replace an exact string in a file. Read the file first — `find` must match the current contents exactly and appear exactly once, which is what stops an edit from landing in the wrong place.",
@@ -235,6 +255,7 @@ export const systemSyscalls: Syscall[] = [
 
   {
     name: "shell.exec",
+    available: hostCanExecute,
     // Arbitrary command execution. Nothing the model can produce is safe by
     // construction here, so this tier is the whole protection.
     risk: "dangerous",
