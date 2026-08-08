@@ -25,9 +25,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Refuse to serve anything at all when no password is configured. Failing
-  // closed here means a misconfigured deployment is locked, not wide open.
   if (!process.env.JARVIS_PASSWORD) {
+    // Local development is exempt: requiring a password to run `npm run dev`
+    // on your own laptop is friction with no attacker to stop. The exemption
+    // is narrow on purpose — development build AND a loopback host, so a dev
+    // server bound to 0.0.0.0 and reached over the network still gets locked.
+    const host = request.headers.get("host") ?? "";
+    const isLoopback = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host);
+
+    if (process.env.NODE_ENV === "development" && isLoopback) {
+      return NextResponse.next();
+    }
+
+    // Anywhere else, refuse to serve at all. A deployment that cannot
+    // authenticate anyone is locked, not wide open.
     return new NextResponse(
       "JARVIS has no password configured. Set JARVIS_PASSWORD in your environment and redeploy.",
       { status: 503, headers: { "Content-Type": "text/plain" } },

@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "JARVIS_DATA_DIR=$(mktemp -d) npx tsx --test kernel/*.test.ts"
+    "test": "JARVIS_DATA_DIR=$(mktemp -d) npx tsx --test kernel/*.test.ts",
+    "setup": "node scripts/setup.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
