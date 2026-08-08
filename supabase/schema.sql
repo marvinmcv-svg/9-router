@@ -35,11 +35,17 @@ create or replace function public.jarvis_readonly_query(query_text text)
 returns jsonb
 language plpgsql
 security invoker
+-- Pinned: without this the function resolves unqualified names against the
+-- caller's search_path, which is a privilege-escalation shape.
+set search_path = pg_catalog, public
 as $$
 declare
   result jsonb;
 begin
-  if query_text !~* '^\s*select\b' then
+  -- `\y` is PostgreSQL's word boundary. `\b` is a backspace escape here, not
+  -- a boundary as it would be in JavaScript or PCRE — using it made this
+  -- guard reject every query, valid SELECTs included.
+  if query_text !~* '^\s*select\y' then
     raise exception 'Only SELECT statements are permitted.';
   end if;
 
